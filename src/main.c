@@ -52,8 +52,14 @@ int main() {
 	client_addr_len = sizeof(client_addr);
 
   int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+
+  char buffer[1024];
   const char *response = "+PONG\r\n";
-  send(client_fd, response, strlen(response), 0);
+  while (1) {
+    ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer), 0);
+    if (bytes_read <= 0) break;
+    send(client_fd, response, strlen(response), 0);
+  }
 
 	accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
 	printf("Client connected\n");
