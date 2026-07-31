@@ -6,6 +6,16 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/epoll.h>
+
+#define MAX_EVENTS 10
+
+void do_use_fd(int conn_sock) {
+  char buffer[1024];
+  const char *response = "+PONG\r\n";
+  ssize_t bytes_read = recv(conn_sock, buffer, sizeof(buffer), 0);
+	send(conn_sock, response, strlen(response), 0);
+}
 
 int main() {
 	// Disable output buffering
@@ -51,20 +61,69 @@ int main() {
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 
-  int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+  struct epoll_event ev, events[MAX_EVENTS];
+  int client_fd, nfds, epollfd;
 
-  char buffer[1024];
-  const char *response = "+PONG\r\n";
-  while (1) {
-    ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer), 0);
-    if (bytes_read <= 0) break;
-    send(client_fd, response, strlen(response), 0);
+  // Create an epoll instance
+  epollfd = epoll_create1(0);
+  if (epollfd == -1) {
+    perror("epoll_create1");
+    exit(EXIT_FAILURE);
   }
 
-	accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-	printf("Client connected\n");
+  // Register file descriptor
+  ev.events = EPOLLIN;
+  ev.data.fd = server_fd;
+  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
+    perror("epoll_ctl: server_fd");
+    exit(EXIT_FAILURE);
+  }
+
+  // Wait for events
+  for (;;) {
+    nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+    if (nfds == -1) {
+      perror("epoll_wait");
+      exit(EXIT_FAILURE);
+    }
+
+    for (int n = 0; n < nfds; ++n) {
+      if (events[n].data.fd == server_fd) {
+        client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+        printf("Client connected\n");
+        if (client_fd == -1) {
+          perror("accept");
+          exit(EXIT_FAILURE);
+        }
+
+        // setnonblocking(client_fd);
+        ev.events = EPOLLIN;
+        ev.data.fd = client_fd;
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
+          perror("epoll_ctl: client_fd");
+          exit(EXIT_FAILURE);
+        }
+      } else {
+        do_use_fd(events[n].data.fd);
+      }
+    }
+  }
+
+	// printf("Client connected\n");
 
 	close(server_fd);
 
 	return 0;
 }
+
+  // int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+
+  // char buffer[1024];
+  // const char *response = "+PONG\r\n";
+	//  while (1) {
+	//    ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer), 0);
+	//    if (bytes_read <= 0) break;
+	//    send(client_fd, response, strlen(response), 0);
+	//  }
+	//
+	// accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
